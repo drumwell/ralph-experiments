@@ -19,7 +19,6 @@ logs/
 
 # Runtime / generated data
 data/
-runs/
 screenshots/
 output
 .ralph-iteration
