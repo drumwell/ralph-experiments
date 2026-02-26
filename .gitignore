@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment & secrets
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+
+# Runtime / generated data
+data/
+runs/
+screenshots/
+output
+.ralph-iteration
+
+# Package lock files
+package-lock.json
+
+# Playwright
+.playwright-mcp/
+
+# Build artifacts
+public/
+
+# Specs (generated)
+specs/PLAN.md
+specs/TEST_RESULTS.md
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Reference screenshots (large binary files)
+*.png

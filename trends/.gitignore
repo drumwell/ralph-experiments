@@ -1,0 +1,9 @@
+node_modules/
+.venv/
+data/transactions.json
+logs/
+screenshots/
+runs/
+.ralph-iteration
+__pycache__/
+*.pyc

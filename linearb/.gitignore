@@ -1,0 +1,11 @@
+.env
+node_modules/
+data/
+.venv/
+runs/
+screenshots/
+server.log
+.ralph-iteration
+specs/PLAN.md
+specs/TEST_RESULTS.md
+package-lock.json
