@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DORA Metrics — paywithextend</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* Inline critical font */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Sidebar ────────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      DORA
+      <span>paywithextend</span>
+    </div>
+    <nav id="sidebar-nav">
+      <a href="#/overview" data-route="overview">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>Overview</span>
+      </a>
+      <a href="#/cycle-time" data-route="cycle-time">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span>Cycle Time</span>
+      </a>
+      <a href="#/deploys" data-route="deploys">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+        <span>Deploys</span>
+      </a>
+      <a href="#/reliability" data-route="reliability">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>Reliability</span>
+      </a>
+      <a href="#/pr-deep-dive" data-route="pr-deep-dive">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span>PR Deep Dive</span>
+      </a>
+      <a href="#/goals" data-route="goals">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        <span>Goals</span>
+      </a>
+      <a href="#/reports" data-route="reports">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Reports</span>
+      </a>
+    </nav>
+    <div class="sidebar-bottom" id="kbd-hint">? for shortcuts</div>
+  </aside>
+
+  <!-- ── Main content ───────────────────────────────────────────────────── -->
+  <div class="main-content">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-title" id="page-title">Overview</div>
+
+      <div class="time-range-picker">
+        <button class="time-btn" data-days="30">30d</button>
+        <button class="time-btn active" data-days="90">90d</button>
+        <button class="time-btn" data-days="180">6mo</button>
+        <button class="time-btn" data-days="365">1yr</button>
+        <button class="time-btn" data-days="all">All</button>
+        <div class="custom-range">
+          <input type="date" id="date-from" placeholder="From">
+          <span style="color:#6e7681">—</span>
+          <input type="date" id="date-to" placeholder="To">
+        </div>
+      </div>
+
+      <button id="refresh-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        Refresh
+      </button>
+      <span id="last-refresh"></span>
+    </header>
+
+    <!-- Pages -->
+    <div class="page-content">
+
+      <!-- ── Overview ────────────────────────────────────────────────── -->
+      <div id="page-overview" class="page active">
+        <div class="metrics-grid" id="overview-cards"></div>
+        <div class="two-col">
+          <div class="section">
+            <div class="section-title">Deploy Trend</div>
+            <canvas id="deploy-trend-chart" height="180"></canvas>
+          </div>
+          <div class="section">
+            <div class="section-title">Recent Incidents</div>
+            <div id="recent-incidents"></div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Recent Deploys</div>
+          <div class="table-wrap">
+            <table class="data-table" id="recent-deploys-table">
+              <thead><tr><th>Repo</th><th>PR</th><th>Title</th><th>Author</th><th>Merged At</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Cycle Time ───────────────────────────────────────────────── -->
+      <div id="page-cycle-time" class="page">
+        <div class="two-col">
+          <div class="section">
+            <div class="section-title">Cycle Time Trend (Median)</div>
+            <canvas id="ct-trend-chart" height="200"></canvas>
+          </div>
+          <div class="section">
+            <div class="section-title">Phase Breakdown</div>
+            <canvas id="ct-phase-chart" height="200"></canvas>
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="section">
+            <div class="section-title">Distribution</div>
+            <canvas id="ct-dist-chart" height="200"></canvas>
+          </div>
+          <div class="section">
+            <div class="section-title">Top 10 Slowest PRs</div>
+            <div class="table-wrap">
+              <table class="data-table" id="slowest-prs-table">
+                <thead><tr><th>Repo</th><th>PR</th><th>Title</th><th>Hours</th><th>Merged</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Deploys ──────────────────────────────────────────────────── -->
+      <div id="page-deploys" class="page">
+        <div class="two-col">
+          <div class="section">
+            <div class="section-title">Deploy Frequency Trend</div>
+            <canvas id="deploy-freq-chart" height="200"></canvas>
+          </div>
+          <div class="section">
+            <div class="section-title">Deploy Heatmap (Day × Hour)</div>
+            <div id="deploy-heatmap"></div>
+            <div class="heatmap-legend">
+              Less <div class="heatmap-legend-cell" style="background:#21262d"></div>
+              <div class="heatmap-legend-cell" style="background:#1e4d7b"></div>
+              <div class="heatmap-legend-cell" style="background:#2d7dd2"></div>
+              <div class="heatmap-legend-cell" style="background:#58a6ff"></div>
+              More
+            </div>
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="section">
+            <div class="section-title">By Repository</div>
+            <div class="table-wrap">
+              <table class="data-table" id="deploys-by-repo">
+                <thead><tr><th>Repo</th><th>Deploys</th><th>Avg Files</th><th>Avg Additions</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="section">
+            <div class="section-title">Deploy Size Trend</div>
+            <canvas id="deploy-size-chart" height="200"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Reliability ──────────────────────────────────────────────── -->
+      <div id="page-reliability" class="page">
+        <div class="two-col">
+          <div class="section">
+            <div class="section-title">Change Failure Rate</div>
+            <canvas id="cfr-trend-chart" height="200"></canvas>
+          </div>
+          <div class="section">
+            <div class="section-title">MTTR Trend</div>
+            <canvas id="mttr-trend-chart" height="200"></canvas>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Incident Timeline</div>
+          <canvas id="incident-bubble-chart" height="200"></canvas>
+        </div>
+        <div class="section">
+          <div class="section-title">Incidents</div>
+          <div class="table-wrap">
+            <table class="data-table" id="incidents-table">
+              <thead><tr><th>Key</th><th>Summary</th><th>Priority</th><th>Discovered</th><th>Resolved</th><th>MTTR</th><th>Status</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">CFR vs Deploy Volume</div>
+          <canvas id="cfr-volume-chart" height="180"></canvas>
+        </div>
+      </div>
+
+      <!-- ── PR Deep Dive ─────────────────────────────────────────────── -->
+      <div id="page-pr-deep-dive" class="page">
+        <div class="section">
+          <div class="filter-bar">
+            <input class="filter-input" id="pr-search" placeholder="Search by title or author...">
+            <select class="filter-select" id="pr-repo-filter"><option value="">All Repos</option></select>
+            <select class="filter-select" id="pr-sort">
+              <option value="total_hours">Sort: Cycle Time</option>
+              <option value="merged_at">Sort: Merge Date</option>
+              <option value="files_changed">Sort: Files Changed</option>
+              <option value="additions">Sort: Additions</option>
+            </select>
+            <select class="filter-select" id="pr-order">
+              <option value="desc">Desc</option>
+              <option value="asc">Asc</option>
+            </select>
+          </div>
+          <div id="pr-summary-bar" class="section-title" style="font-size:0.75rem;color:#8b949e;margin-bottom:8px;"></div>
+
+          <!-- Gantt chart -->
+          <div class="gantt-legend">
+            <div class="gantt-legend-item"><div class="gantt-legend-dot" style="background:#3b82f6"></div>Coding</div>
+            <div class="gantt-legend-item"><div class="gantt-legend-dot" style="background:#f59e0b"></div>Pickup</div>
+            <div class="gantt-legend-item"><div class="gantt-legend-dot" style="background:#a855f7"></div>Review</div>
+            <div class="gantt-legend-item"><div class="gantt-legend-dot" style="background:#10b981"></div>Deploy</div>
+          </div>
+          <canvas id="gantt-canvas"></canvas>
+
+          <div id="pr-detail-panel" class="pr-detail-panel" style="display:none"></div>
+
+          <div class="pagination" id="pr-pagination"></div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">Size vs Cycle Time</div>
+          <canvas id="pr-scatter-chart" height="200"></canvas>
+        </div>
+      </div>
+
+      <!-- ── Goals ────────────────────────────────────────────────────── -->
+      <div id="page-goals" class="page">
+        <div class="section">
+          <div class="section-title">
+            DORA Targets
+            <button class="btn btn-primary btn-sm" id="save-goals-btn">Save Goals</button>
+          </div>
+          <div class="goals-grid" id="goals-form"></div>
+        </div>
+        <div class="section">
+          <div class="section-title">Goal Progress</div>
+          <div class="metrics-grid" id="goal-gauges"></div>
+        </div>
+        <div class="section">
+          <div class="section-title">Week-over-Week Deltas</div>
+          <div class="metrics-grid" id="goal-deltas"></div>
+        </div>
+        <div class="section">
+          <div class="section-title">Actual vs Target Trends</div>
+          <canvas id="goal-trend-chart" height="200"></canvas>
+        </div>
+      </div>
+
+      <!-- ── Reports ──────────────────────────────────────────────────── -->
+      <div id="page-reports" class="page">
+        <div class="section">
+          <div class="section-title">GitHub-style Deploy Calendar</div>
+          <div id="cal-heatmap"></div>
+        </div>
+        <div class="two-col">
+          <div class="section">
+            <div class="section-title">Cumulative Flow</div>
+            <canvas id="flow-chart" height="220"></canvas>
+          </div>
+          <div class="section">
+            <div class="section-title">Throughput vs WIP</div>
+            <canvas id="throughput-chart" height="220"></canvas>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Incident Correlation</div>
+          <div class="table-wrap">
+            <table class="data-table" id="correlation-table">
+              <thead><tr><th>Incident</th><th>Summary</th><th>Discovered</th><th>Suspected PR</th><th>Hours Before</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="section">
+            <div class="section-title">DORA Maturity Radar</div>
+            <canvas id="radar-chart" height="280"></canvas>
+          </div>
+          <div class="section">
+            <div class="section-title">Weekly Digest
+              <button class="btn btn-sm" onclick="window.print()">Print</button>
+            </div>
+            <div id="digest-card"></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /page-content -->
+  </div><!-- /main-content -->
+</div><!-- /app -->
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Keyboard shortcuts modal -->
+<div id="kbd-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;justify-content:center;align-items:center;">
+  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;max-width:360px;width:90%">
+    <div style="font-size:1rem;font-weight:600;margin-bottom:16px">Keyboard Shortcuts</div>
+    <table style="width:100%;font-size:0.8rem;border-collapse:collapse">
+      <tr><td style="padding:5px;color:#58a6ff;font-family:monospace">g o</td><td style="padding:5px;color:#8b949e">Go to Overview</td></tr>
+      <tr><td style="padding:5px;color:#58a6ff;font-family:monospace">g c</td><td style="padding:5px;color:#8b949e">Go to Cycle Time</td></tr>
+      <tr><td style="padding:5px;color:#58a6ff;font-family:monospace">g d</td><td style="padding:5px;color:#8b949e">Go to Deploys</td></tr>
+      <tr><td style="padding:5px;color:#58a6ff;font-family:monospace">g r</td><td style="padding:5px;color:#8b949e">Go to Reliability</td></tr>
+      <tr><td style="padding:5px;color:#58a6ff;font-family:monospace">g p</td><td style="padding:5px;color:#8b949e">Go to PR Deep Dive</td></tr>
+      <tr><td style="padding:5px;color:#58a6ff;font-family:monospace">g g</td><td style="padding:5px;color:#8b949e">Go to Goals</td></tr>
+      <tr><td style="padding:5px;color:#58a6ff;font-family:monospace">g a</td><td style="padding:5px;color:#8b949e">Go to Reports</td></tr>
+      <tr><td style="padding:5px;color:#58a6ff;font-family:monospace">?</td><td style="padding:5px;color:#8b949e">Show/hide shortcuts</td></tr>
+    </table>
+    <button class="btn btn-sm" style="margin-top:16px;width:100%" onclick="document.getElementById('kbd-modal').style.display='none'">Close</button>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
