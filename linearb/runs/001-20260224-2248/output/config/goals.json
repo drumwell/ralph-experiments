@@ -1,0 +1,6 @@
+{
+  "cycle_time_hours": 24,
+  "deploys_per_day": 1,
+  "cfr_pct": 5,
+  "mttr_hours": 2
+}
