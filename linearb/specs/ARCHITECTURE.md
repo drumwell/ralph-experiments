@@ -16,8 +16,9 @@ If you are tempted to refactor the architecture, STOP — read this file first.
 └──────────────────┘                               │ ├─ /api/deploys              │
                                                    │ ├─ /api/reliability          │
 ┌──────────────────┐                               │ ├─ /api/pr-deep-dive         │
-│ config/          │──────────────────────────────▶│ ├─ /api/goals                │
-│ repos.json       │                               │ ├─ /api/goals/status         │
+│ config/          │──────────────────────────────▶│ ├─ /api/teams                │
+│ repos.json       │                               │ ├─ /api/goals                │
+│ teams.json       │                               │ ├─ /api/goals/status         │
 │ goals.json       │                               │ ├─ /api/reports/*            │
 └──────────────────┘                               │ ├─ /api/sanity               │
                                                    │ ├─ /api/prs                  │
@@ -46,7 +47,7 @@ If you are tempted to refactor the architecture, STOP — read this file first.
 
 Data flows in ONE direction for reads. The frontend never writes files. Write actions go through `/api/refresh` and `PUT /api/goals` only.
 
-## Configuration (FROZEN)
+## Configuration
 
 ### config/repos.json
 
@@ -57,18 +58,25 @@ Data flows in ONE direction for reads. The frontend never writes files. Write ac
   "jira_project": "EX",
   "incident_label": "change_failure",
   "default_lookback_days": 90,
-  "github_repos": [
-    "extend-cli", "extend-app", "extend-api", "rds-user-provisioner",
-    "vanta-reminder-service", "txn-enrichment", "python-lambda-template",
-    "extend-infrastructure", "wex-integrator", "ip-blocklist-automation",
-    "extend-ios", "vuln-remediation", "screening-service", "test-integrator",
-    "tsys-integrator", "llm-agents", "mastercard-integrator", "comdata-integrator",
-    "visa-integrator", "amex-integrator", "forge", "identity-service",
-    "extend-android", "dbt-redshift", "extend-shared", "kotlin-lambda-template",
-    "backfill-service", "authzed4k", "spicedb-watch-service", "lambda-amex-proxy"
-  ]
+  "exclude_repos": []
 }
 ```
+
+Repos are discovered dynamically from the GitHub org API (`GET /orgs/{org}/repos?type=sources`). Archived repos are excluded automatically. `exclude_repos` is an optional list of repo names to skip.
+
+### config/teams.json
+
+```json
+{
+  "teams": {
+    "TeamName": ["github-username-1", "github-username-2"]
+  },
+  "known_bots": ["extend-buildbot", "extend-github-bot", "Copilot", "dependabot", "renovate"],
+  "exclude_bots": true
+}
+```
+
+Teams map GitHub usernames to team names. All PR-based metrics can be filtered by team via the `?team=` query parameter. CFR and MTTR are always org-wide (incidents aren't team-attributed). The `/api/sanity` endpoint flags PR authors not assigned to any team. Bot accounts are excluded from metrics when `exclude_bots` is true.
 
 ### config/goals.json
 
@@ -253,7 +261,7 @@ function doraRating(metric, value) {
 
 Rating colors: Elite = `#10b981` (green), High = `#3b82f6` (blue), Medium = `#f59e0b` (amber), Low = `#ef4444` (red).
 
-## API Contract (FROZEN)
+## API Contract
 
 ### Date Range Filtering
 
@@ -262,6 +270,15 @@ All READ endpoints accept optional `from` and `to` query parameters:
 - `to`: ISO 8601 date string. Include data on or before this date.
 - If omitted, default to last 90 days.
 - For PRs, filter by `merged_at`. For incidents, filter by `created_at`.
+
+### Team Filtering
+
+All PR-based READ endpoints accept an optional `team` query parameter:
+- `team`: Team name from `config/teams.json`. Filters PRs to authors in that team.
+- If omitted or empty, returns org-wide data.
+- If an invalid team name is provided, returns 400 with `{ "error": "Unknown team: ..." }`.
+- CFR and MTTR are always org-wide regardless of team filter (incidents aren't team-attributed).
+- `/api/incidents` and `/api/sanity` do not accept the `team` parameter.
 
 ### READ Endpoints
 
@@ -569,7 +586,8 @@ Accept a JSON body matching the `config/goals.json` schema. Validate that all va
 | `fetch-jira.py` | Jira API calls, pagination, incident data extraction, custom field discovery | DORA computation, UI code, GitHub calls |
 | `server.js` | Load cached data + config, compute DORA metrics, serve API + static | HTML/CSS, API calls to GitHub/Jira |
 | `public/*` | All UI: HTML, CSS, JS fetch/render (multi-file OK) | Node.js code, file system access |
-| `config/repos.json` | Repo list and Jira config | Code |
+| `config/repos.json` | Org config, Jira config, repo exclusions | Code |
+| `config/teams.json` | Team definitions and bot config | Code |
 | `config/goals.json` | DORA target values | Code |
 
 ## Error Handling Pattern
