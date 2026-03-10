@@ -18,6 +18,7 @@ let prs = [];
 let incidents = [];
 let repos = {};
 let goals = {};
+let teams = {};
 
 function loadData() {
   // github_prs.json
@@ -58,6 +59,18 @@ function loadData() {
   } catch (e) {
     console.error('ERROR: Could not load config/goals.json —', e.message);
     goals = { cycle_time_hours: 24, deploys_per_day: 1.0, cfr_pct: 5, mttr_hours: 2 };
+  }
+
+  // config/teams.json
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'config', 'teams.json'), 'utf8');
+    teams = JSON.parse(raw);
+    const teamCount = Object.keys(teams.teams || {}).length;
+    const memberCount = Object.values(teams.teams || {}).reduce((s, m) => s + m.length, 0);
+    console.log(`Loaded ${teamCount} teams (${memberCount} members) from config/teams.json`);
+  } catch (e) {
+    console.error('WARNING: Could not load config/teams.json —', e.message);
+    teams = {};
   }
 }
 
@@ -259,9 +272,52 @@ function computeMTTR(incident) {
   return hours >= 0 ? hours : null;
 }
 
+function isBot(username) {
+  if (!username) return false;
+  if (username.endsWith('[bot]')) return true;
+  const knownBots = (teams.known_bots || ['extend-buildbot', 'extend-github-bot', 'Copilot', 'dependabot', 'renovate'])
+    .map(b => b.toLowerCase());
+  return knownBots.includes(username.toLowerCase());
+}
+
+function getTeam(username) {
+  if (!teams.teams) return null;
+  for (const [teamName, members] of Object.entries(teams.teams)) {
+    if (members.includes(username)) return teamName;
+  }
+  return null;
+}
+
+function filterByTeam(prList, teamName) {
+  if (!teamName) return prList;
+  if (!teams.teams || !teams.teams[teamName]) return null;
+  const members = new Set(teams.teams[teamName]);
+  return prList.filter(pr => members.has(pr.author));
+}
+
+function applyTeamFilter(filteredPRs, query) {
+  const teamName = query.team || '';
+  if (!teamName) return { teamPRs: filteredPRs, teamName: '' };
+  const result = filterByTeam(filteredPRs, teamName);
+  if (result === null) {
+    return { teamPRs: null, teamName, error: `Unknown team: ${teamName}` };
+  }
+  return { teamPRs: result, teamName };
+}
+
 // ─── API Endpoints ────────────────────────────────────────────────────────────
 
-// GET /api/overview?from=&to=
+app.get('/api/teams', (req, res) => {
+  if (!teams.teams || Object.keys(teams.teams).length === 0) {
+    return res.json({ teams: [], members: {}, error: 'teams.json not found or invalid' });
+  }
+  res.json({
+    teams: Object.keys(teams.teams),
+    members: teams.teams,
+  });
+});
+
+// GET /api/overview?from=&to=&team=
 app.get('/api/overview', (req, res) => {
   const { fromDate, toDate } = parseDateRange(req.query);
   const days = (toDate - fromDate) / (1000 * 60 * 60 * 24);
@@ -270,12 +326,15 @@ app.get('/api/overview', (req, res) => {
   const filteredPRs = filterByDateRange(prs, 'merged_at', req.query.from, req.query.to);
   const filteredIncidents = filterByDateRange(incidents, 'created_at', req.query.from, req.query.to);
 
+  const { teamPRs, error: teamError } = applyTeamFilter(filteredPRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+
   // Weekly groupings (used for sparklines and deploy_trend)
-  const weeklyPRs = groupByISOWeek(filteredPRs, 'merged_at');
+  const weeklyPRs = groupByISOWeek(teamPRs, 'merged_at');
   const weeklyIncidents = groupByISOWeek(filteredIncidents, 'created_at');
 
-  // === Cycle Time ===
-  const ctHours = filteredPRs.map(pr => computePRPhases(pr).total_hours);
+  // === Cycle Time (team-scoped) ===
+  const ctHours = teamPRs.map(pr => computePRPhases(pr).total_hours);
   const ctMedian = median(ctHours);
 
   const weeklyCtMap = new Map();
@@ -284,8 +343,8 @@ app.get('/api/overview', (req, res) => {
     weeklyCtMap.set(week, median(hours));
   }
 
-  // === Deploy Frequency ===
-  const deployCount = filteredPRs.length;
+  // === Deploy Frequency (team-scoped) ===
+  const deployCount = teamPRs.length;
   const deploysPerDay = days > 0 ? deployCount / days : 0;
 
   const weeklyDeployCountMap = new Map();
@@ -293,19 +352,26 @@ app.get('/api/overview', (req, res) => {
     weeklyDeployCountMap.set(week, weekPRs.length);
   }
 
-  // === CFR ===
+  // === CFR (org-wide: filteredPRs for deploy count, filteredIncidents for incidents) ===
+  const orgDeployCount = filteredPRs.length;
   const incidentCount = filteredIncidents.length;
-  const cfrPct = deployCount > 0 ? (incidentCount / deployCount) * 100 : 0;
+  const cfrPct = orgDeployCount > 0 ? (incidentCount / orgDeployCount) * 100 : 0;
+
+  const orgWeeklyPRs = groupByISOWeek(filteredPRs, 'merged_at');
+  const orgWeeklyDeployCountMap = new Map();
+  for (const [week, wPRs] of orgWeeklyPRs) {
+    orgWeeklyDeployCountMap.set(week, wPRs.length);
+  }
 
   const weeklyCfrMap = new Map();
-  for (const [week] of weeklyPRs) {
-    const weekDeployCount = weeklyDeployCountMap.get(week) || 0;
+  for (const [week] of orgWeeklyPRs) {
+    const weekDeployCount = orgWeeklyDeployCountMap.get(week) || 0;
     const weekIncidentCount = (weeklyIncidents.get(week) || []).length;
     const weekCfr = weekDeployCount > 0 ? (weekIncidentCount / weekDeployCount) * 100 : 0;
     weeklyCfrMap.set(week, weekCfr);
   }
 
-  // === MTTR ===
+  // === MTTR (org-wide) ===
   const mttrValues = filteredIncidents
     .map(i => computeMTTR(i))
     .filter(h => h !== null);
@@ -317,11 +383,11 @@ app.get('/api/overview', (req, res) => {
     weeklyMttrMap.set(week, median(hours));
   }
 
-  // === Deploy trend (all weeks) ===
+  // === Deploy trend (all weeks, team-scoped) ===
   const deployTrend = [...weeklyDeployCountMap.entries()]
     .map(([week, count]) => ({ week, count }));
 
-  // === Recent incidents (last 5 by created_at) ===
+  // === Recent incidents (last 5 by created_at, org-wide) ===
   const recentIncidents = [...filteredIncidents]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 5)
@@ -335,8 +401,8 @@ app.get('/api/overview', (req, res) => {
       url: i.url,
     }));
 
-  // === Recent deploys (last 10 by merged_at) ===
-  const recentDeploys = [...filteredPRs]
+  // === Recent deploys (last 10 by merged_at, team-scoped) ===
+  const recentDeploys = [...teamPRs]
     .sort((a, b) => new Date(b.merged_at) - new Date(a.merged_at))
     .slice(0, 10)
     .map(pr => ({
@@ -363,7 +429,7 @@ app.get('/api/overview', (req, res) => {
       cfr: {
         pct: cfrPct,
         incident_count: incidentCount,
-        deploy_count: deployCount,
+        deploy_count: orgDeployCount,
         rating: doraRating('cfr_pct', cfrPct),
         sparkline: generateSparkline(weeklyCfrMap, 8),
       },
@@ -379,10 +445,12 @@ app.get('/api/overview', (req, res) => {
   });
 });
 
-// GET /api/cycle-time?from=&to=
+// GET /api/cycle-time?from=&to=&team=
 app.get('/api/cycle-time', (req, res) => {
   const filteredPRs = filterByDateRange(prs, 'merged_at', req.query.from, req.query.to);
-  const weeklyPRs = groupByISOWeek(filteredPRs, 'merged_at');
+  const { teamPRs, error: teamError } = applyTeamFilter(filteredPRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+  const weeklyPRs = groupByISOWeek(teamPRs, 'merged_at');
 
   // trend: weekly median total cycle time
   const trend = [];
@@ -405,7 +473,7 @@ app.get('/api/cycle-time', (req, res) => {
   }
 
   // slowest_prs: top 10 by total_hours
-  const slowest_prs = filteredPRs
+  const slowest_prs = teamPRs
     .map(pr => ({ pr, phases: computePRPhases(pr) }))
     .sort((a, b) => b.phases.total_hours - a.phases.total_hours)
     .slice(0, 10)
@@ -429,7 +497,7 @@ app.get('/api/cycle-time', (req, res) => {
     { bucket: '7d+', min: 168, max: Infinity },
   ];
   const distribution = buckets.map(b => {
-    const count = filteredPRs.filter(pr => {
+    const count = teamPRs.filter(pr => {
       const h = computePRPhases(pr).total_hours;
       return h >= b.min && h < b.max;
     }).length;
@@ -439,10 +507,12 @@ app.get('/api/cycle-time', (req, res) => {
   res.json({ trend, phase_breakdown, slowest_prs, distribution });
 });
 
-// GET /api/deploys?from=&to=
+// GET /api/deploys?from=&to=&team=
 app.get('/api/deploys', (req, res) => {
   const filteredPRs = filterByDateRange(prs, 'merged_at', req.query.from, req.query.to);
-  const weeklyPRs = groupByISOWeek(filteredPRs, 'merged_at');
+  const { teamPRs, error: teamError } = applyTeamFilter(filteredPRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+  const weeklyPRs = groupByISOWeek(teamPRs, 'merged_at');
 
   // trend: weekly deploy counts
   const trend = [];
@@ -452,7 +522,7 @@ app.get('/api/deploys', (req, res) => {
 
   // heatmap: day (0=Sun) × hour counts — only emit non-zero entries
   const heatmapMap = new Map();
-  for (const pr of filteredPRs) {
+  for (const pr of teamPRs) {
     if (!pr.merged_at) continue;
     const d = new Date(pr.merged_at);
     const key = `${d.getDay()}_${d.getHours()}`;
@@ -467,7 +537,7 @@ app.get('/api/deploys', (req, res) => {
 
   // by_repo: per-repo deploy count + avg files/additions
   const repoMap = new Map();
-  for (const pr of filteredPRs) {
+  for (const pr of teamPRs) {
     if (!repoMap.has(pr.repo)) repoMap.set(pr.repo, []);
     repoMap.get(pr.repo).push(pr);
   }
@@ -495,10 +565,14 @@ app.get('/api/deploys', (req, res) => {
   res.json({ trend, heatmap, by_repo, size_trend });
 });
 
-// GET /api/reliability?from=&to=
+// GET /api/reliability?from=&to=&team=
 app.get('/api/reliability', (req, res) => {
   const filteredPRs = filterByDateRange(prs, 'merged_at', req.query.from, req.query.to);
   const filteredIncidents = filterByDateRange(incidents, 'created_at', req.query.from, req.query.to);
+
+  // Validate team param but use org-wide data for all computations
+  const { error: teamError } = applyTeamFilter(filteredPRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
   const weeklyPRs = groupByISOWeek(filteredPRs, 'merged_at');
   const weeklyIncidents = groupByISOWeek(filteredIncidents, 'created_at');
 
@@ -546,7 +620,7 @@ app.get('/api/reliability', (req, res) => {
   res.json({ cfr_trend, mttr_trend, incidents: incidentList, cfr_vs_volume });
 });
 
-// GET /api/pr-deep-dive?from=&to=&repo=&search=&sort=&order=&page=&limit=
+// GET /api/pr-deep-dive?from=&to=&team=&repo=&search=&sort=&order=&page=&limit=
 app.get('/api/pr-deep-dive', (req, res) => {
   const { repo, search, sort = 'total_hours', order = 'desc', page = '1', limit = '50' } = req.query;
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
@@ -557,8 +631,12 @@ app.get('/api/pr-deep-dive', (req, res) => {
   const orgMedianHours = median(basePRs.map(pr => computePRPhases(pr).total_hours)) || 0;
   const outlierThreshold = orgMedianHours * 2;
 
+  // Apply team filter
+  const { teamPRs, error: teamError } = applyTeamFilter(basePRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+
   // Filter by repo and search
-  let filteredPRs = basePRs;
+  let filteredPRs = teamPRs;
   if (repo) {
     filteredPRs = filteredPRs.filter(pr => pr.repo === repo);
   }
@@ -626,13 +704,16 @@ app.get('/api/pr-deep-dive', (req, res) => {
   res.json({ prs: pagePRs, total, page: pageNum, pages, outlier_count, org_median_hours: orgMedianHours });
 });
 
-// GET /api/prs?from=&to=&repo=&page=1&limit=25
+// GET /api/prs?from=&to=&team=&repo=&page=1&limit=25
 app.get('/api/prs', (req, res) => {
   const { repo, page = '1', limit = '25' } = req.query;
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10) || 25));
 
   let filteredPRs = filterByDateRange(prs, 'merged_at', req.query.from, req.query.to);
+  const { teamPRs, error: teamError } = applyTeamFilter(filteredPRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+  filteredPRs = teamPRs;
   if (repo) {
     filteredPRs = filteredPRs.filter(pr => pr.repo === repo);
   }
@@ -666,29 +747,37 @@ app.get('/api/goals', (req, res) => {
   res.json(goals);
 });
 
-// GET /api/goals/status?from=&to=
+// GET /api/goals/status?from=&to=&team=
 app.get('/api/goals/status', (req, res) => {
   const { fromDate, toDate } = parseDateRange(req.query);
   const days = (toDate - fromDate) / (1000 * 60 * 60 * 24);
 
   const filteredPRs = filterByDateRange(prs, 'merged_at', req.query.from, req.query.to);
   const filteredIncidents = filterByDateRange(incidents, 'created_at', req.query.from, req.query.to);
-  const weeklyPRs = groupByISOWeek(filteredPRs, 'merged_at');
+
+  const { teamPRs, error: teamError } = applyTeamFilter(filteredPRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+
+  const weeklyTeamPRs = groupByISOWeek(teamPRs, 'merged_at');
+  const weeklyOrgPRs = groupByISOWeek(filteredPRs, 'merged_at');
   const weeklyIncidents = groupByISOWeek(filteredIncidents, 'created_at');
 
   // All weeks sorted
-  const allWeeks = new Set([...weeklyPRs.keys(), ...weeklyIncidents.keys()]);
+  const allWeeks = new Set([...weeklyTeamPRs.keys(), ...weeklyOrgPRs.keys(), ...weeklyIncidents.keys()]);
   const sortedWeeks = [...allWeeks].sort();
 
   // Current period metric values
-  const ctHours = filteredPRs.map(pr => computePRPhases(pr).total_hours);
+  // CT and deploy freq use teamPRs
+  const ctHours = teamPRs.map(pr => computePRPhases(pr).total_hours);
   const ctMedian = median(ctHours);
 
-  const deployCount = filteredPRs.length;
+  const deployCount = teamPRs.length;
   const deploysPerDay = days > 0 ? deployCount / days : 0;
 
+  // CFR/MTTR use org-wide data
+  const orgDeployCount = filteredPRs.length;
   const incidentCount = filteredIncidents.length;
-  const cfrPct = deployCount > 0 ? (incidentCount / deployCount) * 100 : 0;
+  const cfrPct = orgDeployCount > 0 ? (incidentCount / orgDeployCount) * 100 : 0;
 
   const mttrValues = filteredIncidents.map(i => computeMTTR(i)).filter(h => h !== null);
   const mttrMedian = median(mttrValues);
@@ -735,12 +824,14 @@ app.get('/api/goals/status', (req, res) => {
   // weekly_deltas: most recent complete week vs prior week
   // Compute per-week values for each metric
   function weeklyMetrics(week) {
-    const weekPRs = weeklyPRs.get(week) || [];
+    const weekTeamPRs = weeklyTeamPRs.get(week) || [];
+    const weekOrgPRs = weeklyOrgPRs.get(week) || [];
     const weekInc = weeklyIncidents.get(week) || [];
-    const ctHrs = weekPRs.map(pr => computePRPhases(pr).total_hours);
-    const deploys = weekPRs.length;
+    const ctHrs = weekTeamPRs.map(pr => computePRPhases(pr).total_hours);
+    const deploys = weekTeamPRs.length;
+    const orgDeploys = weekOrgPRs.length;
     const incCount = weekInc.length;
-    const cfr = deploys > 0 ? (incCount / deploys) * 100 : 0;
+    const cfr = orgDeploys > 0 ? (incCount / orgDeploys) * 100 : 0;
     const mttrVals = weekInc.map(i => computeMTTR(i)).filter(h => h !== null);
     return {
       cycle_time_hours: median(ctHrs),
@@ -868,9 +959,11 @@ app.put('/api/goals', (req, res) => {
 
 app.get('/api/reports/calendar', (req, res) => {
   const filtered = filterByDateRange(prs, 'merged_at', req.query.from, req.query.to);
+  const { teamPRs, error: teamError } = applyTeamFilter(filtered, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
 
   const dayCounts = new Map();
-  for (const pr of filtered) {
+  for (const pr of teamPRs) {
     const date = pr.merged_at.slice(0, 10); // YYYY-MM-DD
     dayCounts.set(date, (dayCounts.get(date) || 0) + 1);
   }
@@ -886,6 +979,10 @@ app.get('/api/reports/calendar', (req, res) => {
 
 app.get('/api/reports/flow', (req, res) => {
   const { fromDate, toDate } = parseDateRange(req.query);
+
+  // Apply team filter
+  const { teamPRs: flowPRs, error: teamError } = applyTeamFilter(prs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
 
   // Enumerate all ISO weeks overlapping [fromDate, toDate]
   const weekEntries = [];
@@ -910,7 +1007,7 @@ app.get('/api/reports/flow', (req, res) => {
     let in_review = 0;
     let coding = 0;
 
-    for (const pr of prs) {
+    for (const pr of flowPRs) {
       const mergedAt = pr.merged_at ? new Date(pr.merged_at) : null;
       const createdAt = pr.created_at ? new Date(pr.created_at) : null;
       const firstReviewAt = pr.first_review_at ? new Date(pr.first_review_at) : null;
@@ -940,6 +1037,11 @@ app.get('/api/reports/flow', (req, res) => {
 
 app.get('/api/reports/incident-correlation', (req, res) => {
   const filteredIncidents = filterByDateRange(incidents, 'created_at', req.query.from, req.query.to);
+
+  // Apply team filter for suspected PRs
+  const { teamPRs: correlationPRs, error: teamError } = applyTeamFilter(prs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+
   const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
   const correlations = filteredIncidents.map(incident => {
@@ -953,7 +1055,7 @@ app.get('/api/reports/incident-correlation', (req, res) => {
       let bestPR = null;
       let bestDiffMs = Infinity;
 
-      for (const pr of prs) {
+      for (const pr of correlationPRs) {
         if (!pr.merged_at) continue;
         const mergedAt = new Date(pr.merged_at);
         const diffMs = discoveredAt - mergedAt;
@@ -997,25 +1099,25 @@ app.get('/api/reports/radar', (req, res) => {
   const prevToDate = new Date(fromDate.getTime() - 1);
   const prevFromDate = new Date(fromDate.getTime() - periodMs);
 
-  function computeScores(prList, incidentList, from, to) {
+  function computeScores(teamPRList, orgPRList, incidentList, from, to) {
     const days = Math.max(1, (to - from) / (1000 * 60 * 60 * 24));
 
-    // Cycle time (lower is better): elite=24h, low boundary=720h (medium threshold)
-    const ctHours = prList.map(pr => computePRPhases(pr).total_hours);
+    // Cycle time (lower is better, team-scoped): elite=24h, low boundary=720h (medium threshold)
+    const ctHours = teamPRList.map(pr => computePRPhases(pr).total_hours);
     const ctMedian = median(ctHours);
     const ctScore = ctMedian === null
       ? 100
       : Math.max(0, Math.min(100, 100 * (1 - (ctMedian - 24) / (720 - 24))));
 
-    // Deploy frequency (higher is better): elite=1 deploy/day
-    const deploysPerDay = prList.length / days;
+    // Deploy frequency (higher is better, team-scoped): elite=1 deploy/day
+    const deploysPerDay = teamPRList.length / days;
     const dfScore = Math.max(0, Math.min(100, 100 * deploysPerDay / 1));
 
-    // CFR (lower is better): elite=5%, low boundary=15% (medium threshold)
-    const cfrPct = prList.length > 0 ? (incidentList.length / prList.length) * 100 : 0;
+    // CFR (lower is better, org-wide): elite=5%, low boundary=15% (medium threshold)
+    const cfrPct = orgPRList.length > 0 ? (incidentList.length / orgPRList.length) * 100 : 0;
     const cfrScore = Math.max(0, Math.min(100, 100 * (1 - (cfrPct - 5) / (15 - 5))));
 
-    // MTTR (lower is better): elite=1h, low boundary=168h (medium threshold)
+    // MTTR (lower is better, org-wide): elite=1h, low boundary=168h (medium threshold)
     const mttrValues = incidentList.map(i => computeMTTR(i)).filter(v => v !== null);
     const mttrMedian = median(mttrValues);
     const mttrScore = mttrMedian === null
@@ -1035,9 +1137,13 @@ app.get('/api/reports/radar', (req, res) => {
   const prevPRs = filterByDateRange(prs, 'merged_at', prevFromDate.toISOString(), prevToDate.toISOString());
   const prevIncidents = filterByDateRange(incidents, 'created_at', prevFromDate.toISOString(), prevToDate.toISOString());
 
+  const { teamPRs, error: teamError } = applyTeamFilter(filteredPRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+  const { teamPRs: prevTeamPRs } = applyTeamFilter(prevPRs, req.query);
+
   res.json({
-    current: computeScores(filteredPRs, filteredIncidents, fromDate, toDate),
-    previous: computeScores(prevPRs, prevIncidents, prevFromDate, prevToDate),
+    current: computeScores(teamPRs, filteredPRs, filteredIncidents, fromDate, toDate),
+    previous: computeScores(prevTeamPRs, prevPRs, prevIncidents, prevFromDate, prevToDate),
   });
 });
 
@@ -1058,16 +1164,20 @@ app.get('/api/reports/digest', (req, res) => {
   const prevPRs = filterByDateRange(prs, 'merged_at', prevFromDate.toISOString(), prevToDate.toISOString());
   const prevIncidents = filterByDateRange(incidents, 'created_at', prevFromDate.toISOString(), prevToDate.toISOString());
 
-  // Current period metrics
-  const ctMedian = median(filteredPRs.map(pr => computePRPhases(pr).total_hours));
-  const deploysPerDay = filteredPRs.length / days;
+  const { teamPRs, error: teamError } = applyTeamFilter(filteredPRs, req.query);
+  if (teamError) return res.status(400).json({ error: teamError });
+  const { teamPRs: prevTeamPRs } = applyTeamFilter(prevPRs, req.query);
+
+  // Current period metrics (CT/deploy use teamPRs, CFR/MTTR org-wide)
+  const ctMedian = median(teamPRs.map(pr => computePRPhases(pr).total_hours));
+  const deploysPerDay = teamPRs.length / days;
   const cfrPct = filteredPRs.length > 0 ? (filteredIncidents.length / filteredPRs.length) * 100 : 0;
   const mttrValues = filteredIncidents.map(i => computeMTTR(i)).filter(v => v !== null);
   const mttrMedian = median(mttrValues);
 
   // Previous period metrics
-  const prevCtMedian = median(prevPRs.map(pr => computePRPhases(pr).total_hours));
-  const prevDeploysPerDay = prevPRs.length / prevDays;
+  const prevCtMedian = median(prevTeamPRs.map(pr => computePRPhases(pr).total_hours));
+  const prevDeploysPerDay = prevTeamPRs.length / prevDays;
   const prevCfrPct = prevPRs.length > 0 ? (prevIncidents.length / prevPRs.length) * 100 : 0;
   const prevMttrValues = prevIncidents.map(i => computeMTTR(i)).filter(v => v !== null);
   const prevMttrMedian = median(prevMttrValues);
@@ -1182,11 +1292,12 @@ app.get('/api/reports/digest', (req, res) => {
     achievements.push(`MTTR down ${Math.abs(mttrDelta).toFixed(1)}% — faster recovery`);
   }
 
-  // Best value this quarter (cycle time at elite tier)
+  // Best value this quarter (cycle time at elite tier, team-scoped)
   const quarterFrom = new Date(toDate);
   quarterFrom.setDate(quarterFrom.getDate() - 90);
-  const quarterPRs = filterByDateRange(prs, 'merged_at', quarterFrom.toISOString(), toDate.toISOString());
-  const quarterCtMedian = median(quarterPRs.map(pr => computePRPhases(pr).total_hours));
+  const quarterPRsAll = filterByDateRange(prs, 'merged_at', quarterFrom.toISOString(), toDate.toISOString());
+  const { teamPRs: quarterTeamPRs } = applyTeamFilter(quarterPRsAll, req.query);
+  const quarterCtMedian = median(quarterTeamPRs.map(pr => computePRPhases(pr).total_hours));
   if (ctMedian !== null && quarterCtMedian !== null && ctMedian <= quarterCtMedian && ctRating === 'elite') {
     achievements.push(`Achieved Elite cycle time (${ctMedian.toFixed(1)}h) — best this quarter`);
   }
@@ -1395,6 +1506,23 @@ app.get('/api/sanity', (req, res) => {
       : { passed: false, detail: errors.join('; ') };
   });
 
+  addCheck('team_assignment_complete', () => {
+    if (!teams.teams || Object.keys(teams.teams).length === 0) {
+      return { passed: true, detail: 'No teams configured — skipping' };
+    }
+    const allMembers = new Set(Object.values(teams.teams).flat());
+    const excludeBots = teams.exclude_bots !== false;
+    const unassigned = [];
+    const authors = new Set(filteredPRs.map(pr => pr.author));
+    for (const author of authors) {
+      if (excludeBots && isBot(author)) continue;
+      if (!allMembers.has(author)) unassigned.push(author);
+    }
+    return unassigned.length === 0
+      ? { passed: true, detail: `All ${authors.size} contributors assigned to teams` }
+      : { passed: false, detail: `Unassigned contributors: ${unassigned.join(', ')}` };
+  });
+
   const passedCount = checks.filter(c => c.passed).length;
   res.json({
     passed: passedCount === checks.length,
@@ -1431,6 +1559,6 @@ module.exports = {
   parseDateRange,
   toISOWeek,
   // Exported data accessors (used by endpoints added in subsequent tasks)
-  getData: () => ({ prs, incidents, repos, goals }),
+  getData: () => ({ prs, incidents, repos, goals, teams }),
   reloadData: loadData,
 };
