@@ -100,8 +100,7 @@ assert_python "config/repos.json exists and is valid JSON" "
 import json
 d = json.load(open('config/repos.json'))
 assert 'github_org' in d, 'Missing github_org'
-assert 'github_repos' in d, 'Missing github_repos'
-assert len(d['github_repos']) >= 1, 'No repos defined'
+assert 'exclude_repos' in d, 'Missing exclude_repos'
 assert 'jira_instance' in d, 'Missing jira_instance'
 assert 'jira_project' in d, 'Missing jira_project'
 assert 'incident_label' in d, 'Missing incident_label'
