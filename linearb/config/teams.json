@@ -1,0 +1,11 @@
+{
+  "teams": {
+    "Octopod": ["bjunya-extend", "ryan-mok", "donovan-yohan", "seanAtExtend", "kimispencer", "TylerMcCraw", "andrewclements"],
+    "DCF4": ["byjoh", "sawarwick", "SimonOfAllTrades", "annnnna2", "meldiano1987"],
+    "Core": ["Claiborne", "TalyatG", "anandyandawang", "milesbp", "clynch813"],
+    "Platform": ["comjf", "BrianWW", "Justin1002"],
+    "Managers": ["mtyeh411", "KristenManning", "drumwell"],
+    "Other": ["dmorrow", "gangwarp08", "KevinExtend", "Matthiasexe"]
+  },
+  "exclude_bots": true
+}
