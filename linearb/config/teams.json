@@ -7,5 +7,6 @@
     "Managers": ["mtyeh411", "KristenManning", "drumwell"],
     "Other": ["dmorrow", "gangwarp08", "KevinExtend", "Matthiasexe"]
   },
+  "known_bots": ["extend-buildbot", "extend-github-bot", "Copilot", "dependabot", "renovate"],
   "exclude_bots": true
 }
