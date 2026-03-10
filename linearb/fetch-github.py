@@ -217,15 +217,35 @@ def fetch_repo_prs(org, repo):
     return results
 
 
+def fetch_org_repos(org, exclude_repos=None):
+    """Discover all non-archived repos in the org via the GitHub API."""
+    exclude = set(exclude_repos or [])
+    url = f"{BASE_URL}/orgs/{org}/repos?type=sources&per_page=100"
+    repos = []
+    for repo_data in get_paginated(url):
+        name = repo_data.get("name", "")
+        if repo_data.get("archived", False):
+            continue
+        if name in exclude:
+            continue
+        repos.append(name)
+    repos.sort()
+    return repos
+
+
 def main():
     config_path = os.path.join(os.path.dirname(__file__), "config", "repos.json")
     with open(config_path) as f:
         config = json.load(f)
 
     org = config["github_org"]
-    repos = config["github_repos"]
+    exclude_repos = config.get("exclude_repos", [])
 
-    print(f"Fetching merged PRs from {len(repos)} repos (last {LOOKBACK_DAYS} days)...", flush=True)
+    print(f"Discovering repos in {org}...", flush=True)
+    repos = fetch_org_repos(org, exclude_repos)
+    print(f"Found {len(repos)} active repos (excluding {len(exclude_repos)} excluded, archived repos filtered)", flush=True)
+
+    print(f"Fetching merged PRs (last {LOOKBACK_DAYS} days)...", flush=True)
     print(f"Cutoff: {CUTOFF}", flush=True)
 
     all_prs = []
