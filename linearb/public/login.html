@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DORA Metrics — Sign In</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', -apple-system, sans-serif; background: #0d1117; color: #e6edf3; }
+    .login-container { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .login-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 48px 40px; text-align: center; max-width: 400px; width: 100%; }
+    .login-title { font-size: 1.8rem; font-weight: 700; margin: 0 0 4px; }
+    .login-subtitle { color: #7d8590; font-size: 0.85rem; margin: 0 0 32px; }
+    .login-message { color: #8b949e; margin: 0 0 24px; }
+    .login-button { display: inline-block; background: #238636; color: #fff; padding: 10px 24px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 0.9rem; transition: background 0.15s; }
+    .login-button:hover { background: #2ea043; }
+    .login-error { color: #f85149; font-size: 0.85rem; margin-top: 16px; }
+  </style>
+</head>
+<body>
+<div class="login-container">
+  <div class="login-card">
+    <h1 class="login-title">DORA Metrics</h1>
+    <p class="login-subtitle">paywithextend</p>
+    <p class="login-message">Sign in to continue</p>
+    <a href="/auth/google" class="login-button">Sign in with Google</a>
+    <p id="login-error" class="login-error" style="display:none"></p>
+  </div>
+</div>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('error') === 'domain') {
+    const el = document.getElementById('login-error');
+    el.textContent = 'Access is restricted to @paywithextend.com accounts.';
+    el.style.display = 'block';
+  }
+</script>
+</body>
+</html>
