@@ -586,9 +586,33 @@ Accept a JSON body matching the `config/goals.json` schema. Validate that all va
 | `fetch-jira.py` | Jira API calls, pagination, incident data extraction, custom field discovery | DORA computation, UI code, GitHub calls |
 | `server.js` | Load cached data + config, compute DORA metrics, serve API + static | HTML/CSS, API calls to GitHub/Jira |
 | `public/*` | All UI: HTML, CSS, JS fetch/render (multi-file OK) | Node.js code, file system access |
+| `auth.js` | Passport.js config, Google OAuth strategy, session setup, auth middleware | DORA computation, UI code, API route handlers |
 | `config/repos.json` | Org config, Jira config, repo exclusions | Code |
 | `config/teams.json` | Team definitions and bot config | Code |
 | `config/goals.json` | DORA target values | Code |
+
+## Authentication
+
+- **Method:** Google OAuth 2.0 via Passport.js
+- **Domain restriction:** Only `@paywithextend.com` emails can access the app
+- **Sessions:** Express-session with in-memory store (7-day cookie, lost on server restart)
+- **No roles:** All authenticated users have full access
+
+### Auth routes (unprotected)
+- `GET /auth/google` — initiates Google OAuth flow
+- `GET /auth/google/callback` — handles Google's redirect
+- `GET /auth/logout` — destroys session, redirects to login
+- `GET /login.html` — login page
+
+### Protected routes
+- All `/api/*` endpoints return `401` if not authenticated
+- All static assets and pages require authentication
+- `GET /auth/user` returns `{ email, name }` of current user
+
+### Environment variables
+- `GOOGLE_CLIENT_ID` — from Google Cloud Console
+- `GOOGLE_CLIENT_SECRET` — from Google Cloud Console
+- `SESSION_SECRET` — random string for signing session cookies
 
 ## Error Handling Pattern
 
