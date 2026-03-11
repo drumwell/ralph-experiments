@@ -4,13 +4,51 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const session = require('express-session');
+const passport = require('passport');
+const { configurePassport, requireAuth, authRoutes } = require('./auth');
 
 const app = express();
 const PORT = 3201;
 
-// ─── Static + JSON middleware ─────────────────────────────────────────────────
+// ─── Core middleware ──────────────────────────────────────────────────────────
 app.use(express.json());
+
+// ─── Session + Passport ───────────────────────────────────────────────────────
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+  }
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+configurePassport(passport);
+
+// ─── Auth routes (unprotected) ────────────────────────────────────────────────
+app.use(authRoutes(passport));
+
+// Serve login page without auth
+app.get('/login.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// ─── Auth gate ────────────────────────────────────────────────────────────────
+app.use(requireAuth);
+
+// ─── Static files (protected) ─────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ─── Current user ─────────────────────────────────────────────────────────────
+app.get('/auth/user', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  res.json({ email: req.user.email, name: req.user.name });
+});
 
 // ─── Data loading ─────────────────────────────────────────────────────────────
 
