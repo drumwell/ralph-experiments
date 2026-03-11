@@ -1279,6 +1279,19 @@ window.changePage = changePage;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
+// Load and display current user
+(async () => {
+  try {
+    const user = await apiFetch('/auth/user');
+    document.getElementById('user-email').textContent = user.email;
+    document.getElementById('user-info').style.display = '';
+  } catch (e) {
+    // Not authenticated — server-side redirect handles this,
+    // but as a fallback redirect to login
+    window.location.href = '/auth/google';
+  }
+})();
+
 // Load team dropdown (async, doesn't block page load)
 initTeamFilter();
 
