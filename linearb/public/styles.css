@@ -535,3 +535,23 @@ nav a.active svg { opacity: 1; }
   #page-reports { display: block !important; }
   .digest-card { border: 1px solid #ccc; }
 }
+
+/* ── User info in header ─────────────────────────────────────────────────── */
+
+#user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #8b949e;
+}
+
+#user-info a {
+  color: #58a6ff;
+  text-decoration: none;
+  font-size: 0.75rem;
+}
+
+#user-info a:hover {
+  text-decoration: underline;
+}
