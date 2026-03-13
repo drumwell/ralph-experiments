@@ -495,7 +495,7 @@ async function loadPRDeepDive() {
       `${data.total} PRs · ${data.outlier_count} outliers (>2× median ${fmt(data.org_median_hours, 'h')})`;
 
     // Populate repo filter if first load
-    if (!document.getElementById('pr-repo-filter').children.length > 1) {
+    if (document.getElementById('pr-repo-filter').children.length <= 1) {
       const repos = [...new Set(data.prs.map(p => p.repo))].sort();
       const sel = document.getElementById('pr-repo-filter');
       repos.forEach(r => {
