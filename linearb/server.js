@@ -15,14 +15,19 @@ const PORT = 3201;
 app.use(express.json());
 
 // ─── Session + Passport ───────────────────────────────────────────────────────
+if (!process.env.SESSION_SECRET) {
+  console.error('FATAL: SESSION_SECRET env var is required');
+  process.exit(1);
+}
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
   }
 }));
 
@@ -329,8 +334,8 @@ function getTeam(username) {
 function filterByTeam(prList, teamName) {
   if (!teamName) return prList;
   if (!teams.teams || !teams.teams[teamName]) return null;
-  const members = new Set(teams.teams[teamName]);
-  return prList.filter(pr => members.has(pr.author));
+  const members = new Set(teams.teams[teamName].map(m => m.toLowerCase()));
+  return prList.filter(pr => members.has((pr.author || '').toLowerCase()));
 }
 
 function applyTeamFilter(filteredPRs, query) {
