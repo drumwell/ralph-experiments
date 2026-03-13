@@ -12,7 +12,7 @@ function configurePassport(passport) {
   passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: '/auth/google/callback',
+    callbackURL: process.env.OAUTH_CALLBACK_URL || '/auth/google/callback',
   }, (accessToken, refreshToken, profile, done) => {
     if (!profile.emails || !profile.emails.length) {
       return done(null, false, { message: 'No email returned from Google' });

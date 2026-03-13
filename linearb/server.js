@@ -12,6 +12,9 @@ const app = express();
 const PORT = 3201;
 
 // ─── Core middleware ──────────────────────────────────────────────────────────
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
 app.use(express.json());
 
 // ─── Session + Passport ───────────────────────────────────────────────────────
